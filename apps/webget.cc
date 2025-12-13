@@ -11,8 +11,19 @@ using namespace std;
 namespace {
 void get_URL( const string& host, const string& path )
 {
-  debug( "Function called: get_URL( \"{}\", \"{}\" )", host, path );
-  debug( "get_URL() function not yet implemented" );
+  Address address { host, "http" };
+  TCPSocket tcp_socket {};
+  tcp_socket.connect( address );
+  std::string send_message { "GET " + path + " HTTP/1.1\r\n" + "Host: " + host + "\r\n" + "Connection: close\r\n"
+                             + "\r\n" };
+  tcp_socket.write_all( send_message );
+
+  std::string rcv_message {};
+  tcp_socket.read( rcv_message );
+  while ( rcv_message.size() ) {
+    std::cout << rcv_message;
+    tcp_socket.read( rcv_message );
+  }
 }
 } // namespace
 
