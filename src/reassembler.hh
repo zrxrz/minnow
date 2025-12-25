@@ -9,7 +9,7 @@ class Reassembler
 {
 public:
   // Construct Reassembler to write into given ByteStream.
-  explicit Reassembler( ByteStream&& output ) : output_( std::move( output ) ), buffer_{}, ack_{}, seen_last_{}, end_index_{} {}
+  explicit Reassembler( ByteStream&& output ) : output_( std::move( output ) ), buffer_{}, ack_{}, seen_last_{}, end_index_{}, capacity_{output_.writer().available_capacity() + output_.reader().bytes_buffered()} {}
 
   /*
    * Insert a new substring to be reassembled into a ByteStream.
@@ -44,8 +44,6 @@ public:
   // Access output stream writer, but const-only (can't write from outside)
   const Writer& writer() const { return output_.writer(); }
 
-  
-  void handle_overloap( uint64_t first_index, std::string& data);
 
 private:
   ByteStream output_;
@@ -53,4 +51,9 @@ private:
   uint64_t ack_;
   bool seen_last_;
   uint64_t end_index_;
+  uint64_t capacity_;
+
+  void handle_overloap( uint64_t first_index, std::string& data);
+
+  void handle_out_of_bound( uint64_t& first_index, std::string& data);
 };

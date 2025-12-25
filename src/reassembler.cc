@@ -21,9 +21,21 @@ void Reassembler::handle_overloap( uint64_t first_index, std::string& data)
     return;
   }
 
+  if (data.empty()) {
+    return;
+  }
+
   auto lower_it{buffer_.lower_bound(first_index)};
   auto upper_it{buffer_.lower_bound(first_index + data.size())};
 
+  if (buffer_.begin() != lower_it && buffer_.begin() != upper_it) {
+    auto lower_prev{std::prev(lower_it)};
+    auto upper_prev{std::prev(upper_it)};
+    if (lower_prev == upper_prev && first_index >= lower_prev->first && first_index + data.size() <= lower_prev->first + (lower_prev->second).size()) {
+      data.clear();
+      return;
+    }
+  }
   if (buffer_.begin() != lower_it) {
     auto lower_prev{std::prev(lower_it)};
     if (first_index <= lower_prev->first + (lower_prev->second).size()) {
@@ -42,8 +54,31 @@ void Reassembler::handle_overloap( uint64_t first_index, std::string& data)
     // 则一定有lower_it>upper_prev
     // 选择放嵌套if内, 是因为放外面upper_prev出作用域了
     if (lower_it != upper_it) {
-      buffer_.erase(lower_it, upper_prev);
+      auto tmp_it{buffer_.erase(lower_it, upper_prev)};
+      if (first_index + data.size() > tmp_it->first + (tmp_it->second).size()) {
+        buffer_.erase(tmp_it);
+      }
     }
+  }
+}
+
+// uint64_t& 
+void Reassembler::handle_out_of_bound( uint64_t& first_index, std::string& data)
+{
+  if (first_index < ack_) {
+    data.erase(0, ack_ - first_index);
+    first_index = ack_;
+  }
+
+  uint64_t upper_bound{output_.reader().bytes_popped() + capacity_};
+  if (first_index >= upper_bound) {
+    data.clear();
+    return;
+  } 
+  if (first_index + data.size() > upper_bound) {
+    // 使用无符号整数时, 尽量不减法
+    // 如果不得不用, 在使用时一定要小心又小心
+    data.resize(upper_bound  - first_index);
   }
 }
 
@@ -60,19 +95,11 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     }
   }};
 
-  if (data.empty()) {
-    check_if_close();
-    return;
-  }
-
-  uint64_t current_capacity_{output_.writer().available_capacity()};
-  // 使用无符号整数时, 尽量不减法
-  // 如果不得不用, 在使用时一定要小心又小心
-  data = data.substr(0, std::min(current_capacity_ + ack_ - first_index, data.size()));
-
+  handle_out_of_bound(first_index, data);
   // 调用后得到一个可以直接插入map或者push进ByteStream的data
   // 并删除了所有与处理后的data重叠的部分, 或data被重叠的部分
   handle_overloap(first_index, data);
+
   if (first_index == ack_) {
     ack_ += data.size();
     output_.writer().push(std::move(data));
@@ -80,14 +107,12 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     auto it{buffer_.begin()};
     while (it != buffer_.end() && it->first == ack_) {
       ack_ += (it->second).size();
+      output_.writer().push(it->second);
       it = buffer_.erase(it);
     }
-  } else if (first_index > ack_) {
-    buffer_.emplace(first_index, data);
-  } else {
-    data = data.substr(ack_ - first_index);
-    insert(ack_,std::move(data), is_last_substring );
-  }
+  } else if (first_index < ack_ + output_.writer().available_capacity() && first_index > ack_) {
+    buffer_.emplace(first_index, std::move(data));
+  } 
 
   check_if_close();
 }
