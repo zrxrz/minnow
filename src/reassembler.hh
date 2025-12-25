@@ -45,7 +45,7 @@ public:
   const Writer& writer() const { return output_.writer(); }
 
   
-  void insert_helper( uint64_t first_index, std::string& data);
+  void handle_overloap( uint64_t first_index, std::string& data);
 
 private:
   ByteStream output_;
