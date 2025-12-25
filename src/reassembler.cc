@@ -1,84 +1,68 @@
 #include "reassembler.hh"
 #include "debug.hh"
-#include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <utility>
 
 using namespace std;
 
-// 删除所有和data存在完全重叠的节点
-// 设和data存在部分重叠的节点为N, 不重叠的部分为NP
-// 将NP append到data, 并删除N
-// 需要注意的是data的类型是std::string&
-// data必须是不超过capacity的data
-void Reassembler::handle_overloap( uint64_t first_index, std::string& data)
+void Reassembler::clip_and_merge( uint64_t& first_index, std::string& data)
 {
-  // 如果map为空, 直接返回
-  // 因为此函数用于处理重叠问题
-  // map为空, 则没有重叠问题, 由调用函数决定是插入map还是push到ByteStream
-  if (buffer_.empty()) {
+  auto first_unassembled{output_.writer().bytes_pushed()};
+  auto capacity{output_.reader().bytes_buffered() + output_.writer().available_capacity()};
+  auto upper_bound{output_.reader().bytes_popped() + capacity};
+  // clip 左侧越界部分并更新索引
+  // 对于每类情况首先考虑最极端的情况, 并直接返回, 后面还有几个类似的例子
+  if (first_index + data.size() <= first_unassembled) {
+    data.clear();
     return;
   }
-
-  if (data.empty()) {
-    return;
+  if (first_index < first_unassembled) {
+    auto offset{first_unassembled - first_index};
+    data.erase(0, offset);
+    first_index = first_unassembled;
   }
 
-  auto lower_it{buffer_.lower_bound(first_index)};
-  auto upper_it{buffer_.lower_bound(first_index + data.size())};
-
-  if (buffer_.begin() != lower_it && buffer_.begin() != upper_it) {
-    auto lower_prev{std::prev(lower_it)};
-    auto upper_prev{std::prev(upper_it)};
-    if (lower_prev == upper_prev && first_index >= lower_prev->first && first_index + data.size() <= lower_prev->first + (lower_prev->second).size()) {
-      data.clear();
-      return;
-    }
-  }
-  if (buffer_.begin() != lower_it) {
-    auto lower_prev{std::prev(lower_it)};
-    if (first_index <= lower_prev->first + (lower_prev->second).size()) {
-      (lower_prev->second).resize(first_index - lower_prev->first);
-    }
-  }
-
-  // 要对迭代器求prev要求都一样, 它不能是begin()
-  if (buffer_.begin() != upper_it) {
-    auto upper_prev{std::prev(upper_it)};
-    if (first_index + data.size() <= upper_prev->first + (upper_prev->second).size()) {
-      data.resize(upper_prev->first - first_index);
-    }
-    // 避免出现iter指向begin_iter前面而导致的erase UB
-    // 倘若buffer_.begin() == upper_it
-    // 则一定有lower_it>upper_prev
-    // 选择放嵌套if内, 是因为放外面upper_prev出作用域了
-    if (lower_it != upper_it) {
-      auto tmp_it{buffer_.erase(lower_it, upper_prev)};
-      if (first_index + data.size() > tmp_it->first + (tmp_it->second).size()) {
-        buffer_.erase(tmp_it);
-      }
-    }
-  }
-}
-
-// uint64_t& 
-void Reassembler::handle_out_of_bound( uint64_t& first_index, std::string& data)
-{
-  if (first_index < ack_) {
-    data.erase(0, ack_ - first_index);
-    first_index = ack_;
-  }
-
-  uint64_t upper_bound{output_.reader().bytes_popped() + capacity_};
+  // clip 右侧越界部分
   if (first_index >= upper_bound) {
     data.clear();
     return;
-  } 
+  }
   if (first_index + data.size() > upper_bound) {
-    // 使用无符号整数时, 尽量不减法
-    // 如果不得不用, 在使用时一定要小心又小心
-    data.resize(upper_bound  - first_index);
+    auto new_size{upper_bound - first_index};
+    data.resize(new_size);
+  }
+  
+  // clip 左侧部分重叠部分
+  auto it{buffer_.lower_bound(first_index)};
+  // 使用prev必须进行的检查
+  if (it != buffer_.begin()) {
+    auto prev_it{std::prev(it)};
+    auto prev_end{prev_it->first + prev_it->second.size()};
+    if (first_index + data.size() <= prev_end) {
+      data.clear();
+      return;
+    }
+    if (first_index < prev_end) {
+      data.erase(0, prev_end - first_index);
+      first_index = prev_end;
+    }
+  }
+
+  // 迭代增量式依次merge, 并归一化处理clip右侧部分重叠部分
+  it = buffer_.lower_bound(first_index);
+  // 循环condition一般要从语法本身和语义两方面来考虑
+  // insert中还有个类似的例子
+  while (it != buffer_.end() && it->first < first_index + data.size()) {
+    auto next_end{it->first + it->second.size()};
+    if (next_end <= first_index + data.size()) {
+      it = buffer_.erase(it);
+    } else {
+      auto new_size{it->first - first_index};
+      data.resize(new_size);
+      // 养成思考每个分支都有出循环的可能的习惯
+      break;
+    }
   }
 }
 
@@ -90,27 +74,27 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
   }
 
   auto check_if_close{[this](){
-    if (seen_last_ && (end_index_ == ack_)) {
+    if (seen_last_ && end_index_ == output_.writer().bytes_pushed()) {
       output_.writer().close();
     }
   }};
 
-  handle_out_of_bound(first_index, data);
-  // 调用后得到一个可以直接插入map或者push进ByteStream的data
-  // 并删除了所有与处理后的data重叠的部分, 或data被重叠的部分
-  handle_overloap(first_index, data);
+  if (data.empty()) {
+    check_if_close();
+    return;
+  }
 
-  if (first_index == ack_) {
-    ack_ += data.size();
+  clip_and_merge(first_index, data);
+
+  if (first_index == output_.writer().bytes_pushed()) {
     output_.writer().push(std::move(data));
     
     auto it{buffer_.begin()};
-    while (it != buffer_.end() && it->first == ack_) {
-      ack_ += (it->second).size();
-      output_.writer().push(it->second);
+    while (it != buffer_.end() && it->first == output_.writer().bytes_pushed()) {
+      output_.writer().push(std::move(it->second));
       it = buffer_.erase(it);
     }
-  } else if (first_index < ack_ + output_.writer().available_capacity() && first_index > ack_) {
+  } else {
     buffer_.emplace(first_index, std::move(data));
   } 
 
@@ -121,10 +105,11 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
 // This function is for testing only; don't add extra state to support it.
 uint64_t Reassembler::count_bytes_pending() const
 {
-  uint64_t count{0};
+  uint64_t total{0};
+  // 结构化绑定
   for (const auto& [seq, data] : buffer_) {
-    count += data.size();
+    total += data.size();
   }
 
-  return count;
+  return total;
 }
