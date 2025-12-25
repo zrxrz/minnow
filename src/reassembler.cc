@@ -49,15 +49,29 @@ void Reassembler::handle_overloap( uint64_t first_index, std::string& data)
 
 void Reassembler::insert( uint64_t first_index, string data, bool is_last_substring )
 {
+  if (is_last_substring) {
+    seen_last_ = true;
+    end_index_ = first_index + data.size();
+  }
+
+  auto check_if_close{[this](){
+    if (seen_last_ && (end_index_ == ack_)) {
+      output_.writer().close();
+    }
+  }};
+
   if (data.empty()) {
+    check_if_close();
     return;
   }
 
   uint64_t current_capacity_{output_.writer().available_capacity()};
+  // 使用无符号整数时, 尽量不减法
+  // 如果不得不用, 在使用时一定要小心又小心
   data = data.substr(0, std::min(current_capacity_ + ack_ - first_index, data.size()));
 
   // 调用后得到一个可以直接插入map或者push进ByteStream的data
-  // 并删除了所有与处理后的data重叠的部分
+  // 并删除了所有与处理后的data重叠的部分, 或data被重叠的部分
   handle_overloap(first_index, data);
   if (first_index == ack_) {
     ack_ += data.size();
@@ -75,9 +89,7 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     insert(ack_,std::move(data), is_last_substring );
   }
 
-  if (is_last_substring) {
-    output_.writer().close();
-  }
+  check_if_close();
 }
 
 // How many bytes are stored in the Reassembler itself?

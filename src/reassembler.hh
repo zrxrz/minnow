@@ -9,7 +9,7 @@ class Reassembler
 {
 public:
   // Construct Reassembler to write into given ByteStream.
-  explicit Reassembler( ByteStream&& output ) : output_( std::move( output ) ) {}
+  explicit Reassembler( ByteStream&& output ) : output_( std::move( output ) ), buffer_{}, ack_{}, seen_last_{}, end_index_{} {}
 
   /*
    * Insert a new substring to be reassembled into a ByteStream.
@@ -51,4 +51,6 @@ private:
   ByteStream output_;
   std::map<uint64_t, std::string> buffer_;
   uint64_t ack_;
+  bool seen_last_;
+  uint64_t end_index_;
 };
