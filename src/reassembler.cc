@@ -79,12 +79,16 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
     }
   }};
 
+  // 由于map的键是唯一的
+  // clip_and_merge调用和if (data.empty())分支判断不能交换顺序
+  // 否则当clip_and_merge后的data为空串时
+  // buffer_会出现空串占位, 而该索引的有效数据无法插入buffer_, 也无法修改(emplace )
+  clip_and_merge(first_index, data);
+
   if (data.empty()) {
     check_if_close();
     return;
   }
-
-  clip_and_merge(first_index, data);
 
   if (first_index == output_.writer().bytes_pushed()) {
     output_.writer().push(std::move(data));
