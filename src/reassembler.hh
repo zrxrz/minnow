@@ -9,7 +9,9 @@ class Reassembler
 {
 public:
   // Construct Reassembler to write into given ByteStream.
-  explicit Reassembler( ByteStream&& output ) : output_( std::move( output ) ), buffer_{}, seen_last_{}, end_index_{} {}
+  explicit Reassembler( ByteStream&& output )
+    : output_( std::move( output ) ), buffer_ {}, seen_last_ {}, end_index_ {}
+  {}
 
   /*
    * Insert a new substring to be reassembled into a ByteStream.
@@ -44,7 +46,6 @@ public:
   // Access output stream writer, but const-only (can't write from outside)
   const Writer& writer() const { return output_.writer(); }
 
-
 private:
   ByteStream output_;
   std::map<uint64_t, std::string> buffer_;
@@ -53,7 +54,7 @@ private:
 
   // clip datac超出范围以及开头和末尾部分重叠的部分
   // merge data和buffer_中节点完全重叠的部分(采用删除buffer_中和data重叠的节点的方式来实现merge, 最后只存在唯一副本)
-  // data需要clip所以传入引用, 并且在发生开头clip时, 
+  // data需要clip所以传入引用, 并且在发生开头clip时,
   // 需要更新first_index, 所以first_index也传入引用
-  void clip_and_merge( uint64_t& first_index, std::string& data);
+  void clip_and_merge( uint64_t& first_index, std::string& data );
 };
