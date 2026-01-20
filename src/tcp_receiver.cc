@@ -33,7 +33,17 @@ void TCPReceiver::receive( TCPSenderMessage message )
   auto abs_seq { message.seqno.unwrap( zero_point_.value(), ckpt ) };
   // 若不是和SYN一起的data, stream_idx = abs_seq - 1
   // 否则, stream_idx = abs_seq(initial)
-  auto first_index { abs_seq - 1 + ( message.SYN ? 1 : 0 ) };
+  uint64_t first_index {};
+  // Address the risk of overflow
+  if ( message.SYN ) {
+    first_index = 0;
+  } else {
+    //有且仅有SYN包的abs_seq为0, 非SYN包且abs_seq为0的直接丢弃
+    if ( abs_seq == 0 ) {
+      return;
+    }
+    first_index = abs_seq - 1;
+  }
   reassembler_.insert( first_index, message.payload, message.FIN );
 }
 
